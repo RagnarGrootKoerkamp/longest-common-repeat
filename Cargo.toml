@@ -1,0 +1,16 @@
+[workspace]
+members = []
+resolver = "2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
+# 2x smaller file size when 'true', but that takes longer
+lto = "thin"
+incremental = true
+opt-level = 3
+debug = false
+# 10x smaller file size without debug symbols.
+# Breaks backtrace printing.
+strip = false
+
+[workspace.dependencies]
