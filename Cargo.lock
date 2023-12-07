@@ -7,6 +7,7 @@ name = "coloured-trees"
 version = "0.1.0"
 dependencies = [
  "itertools",
+ "rmq",
 ]
 
 [[package]]
@@ -23,3 +24,7 @@ checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
 dependencies = [
  "either",
 ]
+
+[[package]]
+name = "rmq"
+version = "0.1.0"

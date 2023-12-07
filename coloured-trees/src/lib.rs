@@ -1,7 +1,5 @@
-pub mod rmq;
-
-use crate::rmq::Rmq;
 use itertools::Itertools;
+use rmq::Rmq;
 use std::cmp::max;
 
 type Node = usize;
