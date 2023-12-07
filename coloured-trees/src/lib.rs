@@ -1,3 +1,6 @@
+pub mod rmq;
+
+use crate::rmq::Rmq;
 use itertools::Itertools;
 use std::cmp::max;
 
@@ -30,6 +33,8 @@ pub fn max_common_weight(a: &Tree, b: &Tree) -> (Weight, (Node, Node)) {
 
     let mut ans = (0, (Node::MAX, Node::MAX));
 
+    let rmq = rmq::SparseTable::new(&b.lcp);
+
     // Inclusive start pos in a of range of subtree, and right-lcp.
     let mut stack = vec![(0, 0)];
     for (i, &a_lcp_right) in a.lcp.iter().enumerate() {
@@ -44,8 +49,7 @@ pub fn max_common_weight(a: &Tree, b: &Tree) -> (Weight, (Node, Node)) {
             // TODO: When ranges are very unbalanced, only check the insertion points.
             for (&(bl, al), &(br, ar)) in b_idx[old_start..=i].iter().tuple_windows() {
                 if (al < start) ^ (ar < start) {
-                    // TODO: lcp of b part.
-                    ans = max(ans, (a_lcp + todo!(), (al, ar)));
+                    ans = max(ans, (a_lcp + rmq.query(bl..br), (al, ar)));
                 }
             }
 
