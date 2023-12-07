@@ -33,7 +33,7 @@ pub fn max_common_weight(a: &Tree, b: &Tree) -> (Weight, (Node, Node)) {
 
     let mut ans = (0, (Node::MAX, Node::MAX));
 
-    let rmq = rmq::SparseTable::new(&b.lcp);
+    let rmq = rmq::MaskRmq::new(&b.lcp);
 
     // Inclusive start pos in a of range of subtree, and right-lcp.
     let mut stack = vec![(0, 0)];
