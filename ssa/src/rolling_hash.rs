@@ -12,8 +12,8 @@ const R: u64 = 15;
 // const P: Hash = (1 << 61) - 1;
 const BASE: u64 = 256;
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub struct Mod(u64);
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+pub struct Mod(pub u64);
 impl Mul<u64> for Mod {
     type Output = Self;
     fn mul(self, f: u64) -> Self::Output {
@@ -47,6 +47,7 @@ impl Sub for Mod {
     }
 }
 impl Mod {
+    pub const NONE: Mod = Mod(u64::MAX);
     /// h = (self * f + hr) % P
     fn mul_add(self, f: u64, hr: Mod) -> Self {
         let h2 = self.0 as u128 * f as u128;
@@ -133,7 +134,13 @@ impl<'a> RollingHash<'a> {
         }
     }
 
+    fn offset(m: Mod) -> Mod {
+        const OFFSET: u64 = 1 << 48;
+        Mod(m.0 + OFFSET)
+    }
+
     /// Query the hash of the given range.
+    /// Range may extend beyond the text, in which case we return `Mod(OFFSET-overshoot)`.
     /// Compute as
     /// ```txt
     /// |......|..i...|......|...j..|...
@@ -146,6 +153,11 @@ impl<'a> RollingHash<'a> {
     ///
     /// ```
     pub fn query(&self, range: Range<usize>) -> Mod {
+        assert!(range.start <= self.text.len());
+        if range.end > self.text.len() {
+            assert!(range.end <= 2 * self.text.len());
+            return Self::offset(Mod(0u64.wrapping_sub((range.end - self.text.len()) as u64)));
+        }
         let Range { start: i, end: j } = range;
         if range.len() <= 2 * self.s {
             return Self::linear(&self.text[range]);
@@ -158,7 +170,7 @@ impl<'a> RollingHash<'a> {
         let sr = Self::linear(&self.text[(r << self.log_s)..j]);
         let hl = pl + self.f.pow(l as u64) * sl;
         let hr = pr + self.f.pow(r as u64) * sr;
-        (hr - hl) * self.base_inv.pow(i as u64)
+        Self::offset((hr - hl) * self.base_inv.pow(i as u64))
     }
 
     /// Hash `t` 8 chars at a time.
@@ -175,7 +187,7 @@ impl<'a> RollingHash<'a> {
             // h = (2^64*h + val) % P = R*h+val;
             h = h.roll_add(u64::from_le_bytes(c.try_into().unwrap()));
         }
-        h
+        Self::offset(h)
     }
 
     #[cfg(test)]
@@ -190,7 +202,7 @@ impl<'a> RollingHash<'a> {
         for &c in t.iter().rev() {
             h = h.mul_add(BASE, Mod(c as u64));
         }
-        h
+        Self::offset(h)
     }
 }
 
