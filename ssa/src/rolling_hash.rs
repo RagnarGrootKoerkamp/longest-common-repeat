@@ -160,7 +160,7 @@ impl<'a> RollingHash<'a> {
         }
         let Range { start: i, end: j } = range;
         if range.len() <= 2 * self.s {
-            return Self::linear(&self.text[range]);
+            return Self::offset(Self::linear(&self.text[range]));
         }
         let l = i >> self.log_s;
         let r = j >> self.log_s;
@@ -187,12 +187,12 @@ impl<'a> RollingHash<'a> {
             // h = (2^64*h + val) % P = R*h+val;
             h = h.roll_add(u64::from_le_bytes(c.try_into().unwrap()));
         }
-        Self::offset(h)
+        h
     }
 
     #[cfg(test)]
     pub fn query_linear(&self, range: Range<usize>) -> Mod {
-        Self::linear(&self.text[range])
+        Self::offset(Self::linear(&self.text[range]))
     }
 
     /// Hash `t` one char at a time.
@@ -202,7 +202,7 @@ impl<'a> RollingHash<'a> {
         for &c in t.iter().rev() {
             h = h.mul_add(BASE, Mod(c as u64));
         }
-        Self::offset(h)
+        h
     }
 }
 
