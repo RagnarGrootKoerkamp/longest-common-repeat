@@ -8,7 +8,9 @@ use ssa::Ssa;
 struct Args {
     file: PathBuf,
     density: f32,
-    max_l: usize,
+    l0: usize,
+    #[clap(short, long)]
+    exp_search: bool,
 }
 
 fn main() {
@@ -31,8 +33,8 @@ fn main() {
         .cloned()
         .collect();
     eprintln!("Idxs: {}", idxs.len());
-    eprintln!("Building...");
+    eprintln!("Building... with exp_search {}", args.exp_search);
     let start = std::time::Instant::now();
-    let _ssa = Ssa::new(t, idxs, Some(args.max_l));
+    let _ssa = Ssa::new(t, idxs, Some(args.l0), args.exp_search);
     eprintln!("Time: {:?}", start.elapsed());
 }

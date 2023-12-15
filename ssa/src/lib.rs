@@ -37,10 +37,10 @@ fn group_len(v: &mut [IH], i: usize) -> usize {
 }
 
 impl Ssa {
-    pub fn new(t: &[u8], idxs: Vec<usize>, max_l: Option<usize>) -> Self {
+    pub fn new(t: &[u8], idxs: Vec<usize>, l0: Option<usize>, exp_search: bool) -> Self {
         assert!(!idxs.is_empty());
         let n = t.len();
-        let max_l = match max_l {
+        let l0 = match l0 {
             Some(max_l) => max_l.next_power_of_two(),
             None => 1 << n.ilog2(),
         };
@@ -77,6 +77,7 @@ impl Ssa {
         /// Given a slice of indices that already have the given lcp, sort them in-place and write the LCP array.
         fn dfs(
             l: usize,
+            exp_search: bool,
             group_lcp: usize,
             t: &[u8],
             hasher: &RollingHash,
@@ -125,12 +126,21 @@ impl Ssa {
             // Fourth, recurse into groups.
             if num_groups == 1 {
                 // One big group: Recurse with increased LCP length.
-                dfs(l / 2, group_lcp + l, t, hasher, starts, cache, lcp_out);
+                dfs(
+                    if exp_search { l * 2 } else { l / 2 },
+                    exp_search,
+                    group_lcp + l,
+                    t,
+                    hasher,
+                    starts,
+                    cache,
+                    lcp_out,
+                );
                 return;
             }
             if num_groups == n {
                 // All groups are singletons: Recurse with original LCP length.
-                dfs(l / 2, group_lcp, t, hasher, starts, cache, lcp_out);
+                dfs(l / 2, false, group_lcp, t, hasher, starts, cache, lcp_out);
                 return;
             }
             // Otherwise:
@@ -166,9 +176,10 @@ impl Ssa {
             assert_eq!(i, n);
             assert_eq!(j, num_groups);
 
-            // 3. Recursively sort the main array.
+            // 3. Recursively sort the main array of LCPs that grow less than l.
             dfs(
                 l / 2,
+                false,
                 group_lcp,
                 t,
                 hasher,
@@ -201,7 +212,7 @@ impl Ssa {
 
             cache.shrink_to(old_cache_len);
 
-            // 5. Recurse on the groups.
+            // 5. Recurse on the groups that grow more than l.
             while i < n {
                 if starts[i].h == Mod::NONE {
                     i += 1;
@@ -209,7 +220,8 @@ impl Ssa {
                 }
                 let group_len = group_len(starts, i);
                 dfs(
-                    l / 2,
+                    if exp_search { l * 2 } else { l / 2 },
+                    exp_search,
                     group_lcp + l,
                     t,
                     hasher,
@@ -221,7 +233,16 @@ impl Ssa {
             }
         }
 
-        dfs(max_l, 0, t, &hasher, &mut starts, &mut cache, &mut lcp);
+        dfs(
+            l0,
+            exp_search,
+            0,
+            t,
+            &hasher,
+            &mut starts,
+            &mut cache,
+            &mut lcp,
+        );
 
         Self {
             sa: starts.iter().map(|x| x.idx).collect(),
@@ -268,7 +289,7 @@ mod test {
             &[0, 0, 0, 0],
         ] {
             let idxs = (0..t.len()).collect::<Vec<_>>();
-            let ssa = Ssa::new(t, idxs, None);
+            let ssa = Ssa::new(t, idxs, None, false);
             verify(ssa, t);
         }
     }
@@ -286,7 +307,7 @@ mod test {
                 if idxs.is_empty() {
                     continue;
                 }
-                let ssa = Ssa::new(&t, idxs, None);
+                let ssa = Ssa::new(&t, idxs, None, false);
                 verify(ssa, &t);
             }
         }
