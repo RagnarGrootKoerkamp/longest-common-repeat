@@ -94,7 +94,10 @@ impl Ssa {
                     let idx = witness(*idx, t, cache);
                     *h = hasher.query(idx + group_lcp..idx + group_lcp + 1);
                 }
-                starts.radix_sort_unstable();
+                starts
+                    .radix_sort_builder()
+                    .with_single_threaded_tuner()
+                    .sort();
                 return;
             }
 
@@ -109,7 +112,10 @@ impl Ssa {
                 *h = hasher.query(idx + group_lcp..idx + group_lcp + l);
             }
             // Second, sort by hashes.
-            starts.radix_sort_unstable();
+            starts
+                .radix_sort_builder()
+                .with_single_threaded_tuner()
+                .sort();
             // Third, count groups.
             let num_groups = starts.group_by(|a, b| a.h == b.h).count();
             // Fourth, recurse into groups.
