@@ -37,10 +37,13 @@ fn group_len(v: &mut [IH], i: usize) -> usize {
 }
 
 impl Ssa {
-    pub fn new(t: &[u8], idxs: Vec<usize>) -> Self {
+    pub fn new(t: &[u8], idxs: Vec<usize>, max_l: Option<usize>) -> Self {
         assert!(!idxs.is_empty());
         let n = t.len();
-        let max_l = 1 << n.ilog2();
+        let max_l = match max_l {
+            Some(max_l) => max_l.next_power_of_two(),
+            None => 1 << n.ilog2(),
+        };
         let b = idxs.len();
         let s = if n == 1 {
             8
@@ -48,6 +51,7 @@ impl Ssa {
             (n / n.ilog2() as usize).next_power_of_two().max(8)
         };
         let hasher = rolling_hash::RollingHash::new(t, s);
+        eprintln!("Hasher done");
 
         let mut starts = idxs
             .into_iter()
@@ -245,7 +249,7 @@ mod test {
                 "Bad order at position {i}"
             );
             assert_eq!(
-                lcp(&t, ssa.sa[i], ssa.sa[i + 1]),
+                lcp(t, ssa.sa[i], ssa.sa[i + 1]),
                 ssa.lcp[i],
                 "Bad LCP at position {i}. Got {}",
                 ssa.lcp[i]
@@ -256,15 +260,15 @@ mod test {
     #[test]
     fn small() {
         for t in [
-            // &b"aaaa"[..],
-            // &b"aa"[..],
-            // &b"baa"[..],
-            // &b"abracadabra"[..],
-            // &[4, 2, 1, 1, 2],
+            &b"aaaa"[..],
+            &b"aa"[..],
+            &b"baa"[..],
+            &b"abracadabra"[..],
+            &[4, 2, 1, 1, 2],
             &[0, 0, 0, 0],
         ] {
             let idxs = (0..t.len()).collect::<Vec<_>>();
-            let ssa = Ssa::new(t, idxs);
+            let ssa = Ssa::new(t, idxs, None);
             verify(ssa, t);
         }
     }
@@ -282,7 +286,7 @@ mod test {
                 if idxs.is_empty() {
                     continue;
                 }
-                let ssa = Ssa::new(&t, idxs);
+                let ssa = Ssa::new(&t, idxs, None);
                 verify(ssa, &t);
             }
         }
