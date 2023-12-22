@@ -1,18 +1,20 @@
 use std::ops::{Add, Mul, Range, Sub};
 
-/// (2^64-15)/53
-/// This has the property that 2^64 mod P = 15, and 15*P < 2^64.
-///
-/// t.chunks(s).
+// (2^64-15)/53
+// This has the property that 2^64 mod P = 15, and 15*P < 2^64.
 const P: u64 = 348051774975651917;
 const R: u64 = 15;
+// (2^64-17)/(19*67)
+// This can be multiplied by 256 without overflow.
+// const P: u64 = 14490765179661863;
+// const R: u64 = 17;
 // Largest 64-bit prime
 // const P: Hash = 18446744073709551557;
-// Largest 64-bit Mersen prime.
+// Largest 64-bit Mersenne prime.
 // const P: Hash = (1 << 61) - 1;
 const BASE: u64 = 256;
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default, PartialOrd, Ord)]
 pub struct Mod(pub u64);
 impl Mul<u64> for Mod {
     type Output = Self;
@@ -134,9 +136,25 @@ impl<'a> RollingHash<'a> {
         }
     }
 
+    /// Iterates over the hashes of all kmers in reverse.
+    pub fn kmer_hashes_rev(text: &[u8], k: usize) -> impl Iterator<Item = (usize, Mod)> + '_ {
+        assert!(k > 0);
+        // Hash the first k-1 chars.
+        let offset = text.len().saturating_sub(k - 1);
+        let mut h = Self::linear(&text[offset..]);
+        let pp = Mod(BASE).pow(k as u64 - 1);
+        let mut drop: u8 = 0;
+        (0..offset).rev().map(move |i| {
+            h = h - pp * drop as u64;
+            h = h * BASE + Mod(text[i] as u64);
+            drop = text[i + k - 1];
+            (i, h)
+        })
+    }
+
     fn offset(m: Mod) -> Mod {
         const OFFSET: u64 = 1 << 48;
-        Mod(m.0 + OFFSET)
+        Mod(m.0.wrapping_add(OFFSET))
     }
 
     /// Query the hash of the given range.
@@ -276,5 +294,17 @@ mod test {
             }
         }
         black_box(sum);
+    }
+
+    #[test]
+    fn kmer_hashes_rev() {
+        for n in 1..1000 {
+            for k in 1..20 {
+                let t = (0..n).map(|_| rand::random::<u8>()).collect::<Vec<_>>();
+                for (i, h) in RollingHash::kmer_hashes_rev(&t, k) {
+                    assert_eq!(h, RollingHash::linear(&t[i..i + k]));
+                }
+            }
+        }
     }
 }
