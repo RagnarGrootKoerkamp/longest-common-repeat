@@ -89,24 +89,61 @@ impl<T: Ord + Clone + Copy + Default> Rmq<T> for MaskRmq<T> {
     }
 
     fn query(&self, range: Range<usize>) -> T {
-        let mask_min = |mask: B| -> T {
+        assert!(!range.is_empty());
+        let mask_min = |pos: usize, bitmask: u64| -> T {
+            let mask = self.masks[pos] & bitmask;
             let offset = W - 1 - mask.leading_zeros() as usize;
-            self.a[range.start + offset]
+            self.a[pos + offset]
         };
-        if range.len() <= W {
-            return mask_min(self.masks[range.start] & ((1 << range.len()) - 1));
+        if range.len() < W {
+            let bitmask = (1u64 << (range.len())).wrapping_sub(1);
+            return mask_min(range.start, bitmask);
         }
         let ends = T::min(
             // head
-            mask_min(self.masks[range.start]),
+            mask_min(range.start, B::MAX),
             // tail
-            mask_min(self.masks[range.end - W]),
+            mask_min(range.end - W, B::MAX),
         );
 
-        let blocks = self
-            .sparse
-            .query(range.start.div_ceil(W)..range.end.div_ceil(W));
-
+        let range = range.start.div_ceil(W)..range.end / W;
+        if range.is_empty() {
+            return ends;
+        }
+        let blocks = self.sparse.query(range);
         T::min(ends, blocks)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn test_rmq<R: Rmq<u32>>() {
+        for n in (1..10).chain((100..1000).step_by(200)) {
+            let a = (0..n).map(|_| rand::random::<u32>()).collect::<Vec<_>>();
+            let rmq = R::new(&a);
+            for i in 0..n {
+                for j in i + 1..=n {
+                    let test_ans = rmq.query(i..j);
+                    let real_ans = *a[i..j].iter().min().unwrap();
+                    assert_eq!(
+                        test_ans,
+                        real_ans,
+                        "Failure for n={n} i={i} j={j} len={}.",
+                        j - i,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sparse_table() {
+        test_rmq::<SparseTable<u32>>();
+    }
+    #[test]
+    fn mask_rmq() {
+        test_rmq::<MaskRmq<u32>>();
     }
 }
