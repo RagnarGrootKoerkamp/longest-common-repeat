@@ -1,5 +1,6 @@
 #![feature(impl_trait_in_assoc_type, slice_group_by)]
 
+mod minimizers;
 pub mod rolling_hash;
 
 use rdst::{RadixKey, RadixSort};
