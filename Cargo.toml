@@ -1,5 +1,5 @@
 [workspace]
-members = ["coloured-trees", "rmq", "ssa"]
+members = ["coloured-trees", "nthash", "rmq", "ssa"]
 resolver = "2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
