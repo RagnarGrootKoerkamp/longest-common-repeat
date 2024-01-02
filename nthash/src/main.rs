@@ -14,10 +14,12 @@ type B = u64;
 
 const H_LOOKUP: [B; 256] = {
     let mut lookup = [1; 256];
-    let a = 0x3c8b_fbb3_95c6_0474u64 as B;
+    //  a = 0x3c8b_fbb3_95c6_0474u64 as B;
+    let a = 0x3c8b_fbb3_95c6_0470u64 as B;
     let c = 0x3193_c185_62a0_2b4cu64 as B;
     let g = 0x2032_3ed0_8257_2324u64 as B;
-    let t = 0x2955_49f5_4be2_4456u64 as B;
+    //  t = 0x2955_49f5_4be2_4456u64 as B;
+    let t = a ^ c ^ g;
     lookup[b'A' as usize] = a;
     lookup[b'C' as usize] = c;
     lookup[b'G' as usize] = g;
