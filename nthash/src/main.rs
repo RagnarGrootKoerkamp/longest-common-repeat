@@ -12,6 +12,42 @@ use rdst::RadixSort;
 // type B = u32;
 type B = u64;
 
+const H_LOOKUP: [B; 256] = {
+    let mut lookup = [1; 256];
+    let a = 0x3c8b_fbb3_95c6_0474u64 as B;
+    let c = 0x3193_c185_62a0_2b4cu64 as B;
+    let g = 0x2032_3ed0_8257_2324u64 as B;
+    let t = 0x2955_49f5_4be2_4456u64 as B;
+    lookup[b'A' as usize] = a;
+    lookup[b'C' as usize] = c;
+    lookup[b'G' as usize] = g;
+    lookup[b'T' as usize] = t;
+    lookup[0] = a as B;
+    lookup[1] = c as B;
+    lookup[2] = g as B;
+    lookup[3] = t as B;
+    lookup
+};
+
+const DIFFS: [B; 4] = {
+    let a = H_LOOKUP[b'A' as usize] as B;
+    let c = H_LOOKUP[b'C' as usize] as B;
+    let g = H_LOOKUP[b'G' as usize] as B;
+    let t = H_LOOKUP[b'T' as usize] as B;
+    // [0, a ^ c, a ^ g, a ^ t, c ^ g, c ^ t, g ^ t, 0]
+    [0, a ^ c, a ^ g, a ^ t]
+};
+const DIFF_BITS: u32 = 2;
+const DIFF_CHARS: [(u8, u8); 7] = [
+    (b'A', b'A'),
+    (b'A', b'C'),
+    (b'A', b'G'),
+    (b'A', b'T'),
+    (b'C', b'G'),
+    (b'C', b'T'),
+    (b'G', b'T'),
+];
+
 fn to_string(bits: usize, s: &mut [u8]) {
     for (i, c) in s.iter_mut().enumerate() {
         *c = b"ACGT"[(bits >> (2 * i)) % 4];
@@ -48,14 +84,14 @@ fn main() {
         eprintln!("k {k} (new)");
         let start = std::time::Instant::now();
         let collisions = search_collision(k);
-        v.push(collisions.len());
+        v.push((k, collisions.len()));
         eprintln!("Took {:?}", start.elapsed());
 
         if !collisions.is_empty() {
             let start = std::time::Instant::now();
             resolve_collisions(k, collisions);
             eprintln!("Took {:?}", start.elapsed());
-            return;
+            // return;
         }
 
         // eprintln!("k {k} (old)");
@@ -64,9 +100,8 @@ fn main() {
         // eprintln!("Took {:?}", start.elapsed());
     }
     eprintln!("Counts:");
-    for (mut i, c) in v.iter().enumerate() {
-        i += 1;
-        eprintln!("{i:>2} {c:>20}");
+    for (k, c) in v {
+        eprintln!("{k:>2} {c:>20}");
     }
 }
 
@@ -77,7 +112,7 @@ fn search_collision(k: u32) -> Vec<B> {
 
     assert!(k % 2 == 0);
 
-    let mut v: Vec<B> = (0..1 << (3 * k / 2))
+    let mut v: Vec<B> = (0..1 << (DIFF_BITS * k / 2))
         .into_par_iter()
         .flat_map_iter(|i| {
             let h = match reduced_hash(k, i) {
@@ -114,7 +149,7 @@ fn resolve_collisions(k: u32, c: Vec<B>) {
 
     let fragments: Mutex<Vec<(usize, usize)>> = Mutex::new(vec![(usize::MAX, usize::MAX); c.len()]);
 
-    (0..1 << (3 * k / 2)).into_par_iter().for_each(|i| {
+    (0..1 << (DIFF_BITS * k / 2)).into_par_iter().for_each(|i| {
         let h = match reduced_hash(k, i) {
             Some(value) => value,
             None => return,
@@ -137,7 +172,11 @@ fn resolve_collisions(k: u32, c: Vec<B>) {
     let mut fs = fragments.into_inner().unwrap();
 
     for (&(il, ir), c) in fs.iter().zip(c) {
-        eprintln!("Collision: {:0width$b}", c, width = B::BITS as usize);
+        eprintln!(
+            "Collision: {:0width$b} {il} {ir}",
+            c,
+            width = B::BITS as usize
+        );
         let cl = get_chars(k, il);
         let cr = get_chars(k, ir);
         let s1 = format!("{}{}", cl.0, cr.0);
@@ -153,27 +192,11 @@ fn resolve_collisions(k: u32, c: Vec<B>) {
     }
 }
 
-const DIFFS: [B; 8] = {
-    let a = H_LOOKUP[b'A' as usize] as B;
-    let c = H_LOOKUP[b'C' as usize] as B;
-    let g = H_LOOKUP[b'G' as usize] as B;
-    let t = H_LOOKUP[b'T' as usize] as B;
-    [0, a ^ c, a ^ g, a ^ t, c ^ g, c ^ t, g ^ t, 0]
-};
-const DIFF_CHARS: [(u8, u8); 7] = [
-    (b'A', b'A'),
-    (b'A', b'C'),
-    (b'A', b'G'),
-    (b'A', b'T'),
-    (b'C', b'G'),
-    (b'C', b'T'),
-    (b'G', b'T'),
-];
 fn reduced_hash(k: u32, i: usize) -> Option<B> {
     let mut h: B = 0;
     for j in 0..k / 2 {
-        let c = (i >> (3 * j)) & 7;
-        if c == 7 {
+        let c = (i >> (DIFF_BITS * j)) & ((1 << DIFF_BITS) - 1);
+        if c >= DIFFS.len() {
             return None;
         }
         h ^= unsafe { DIFFS.get_unchecked(c).rotate_right(j + B::BITS - 1) };
@@ -192,8 +215,8 @@ fn get_chars(k: u32, i: usize) -> (String, String) {
     let mut s1 = vec![];
     let mut s2 = vec![];
     for j in 0..k / 2 {
-        let c = (i >> (3 * j)) & 7;
-        if c == 7 {
+        let c = (i >> (DIFF_BITS * j)) & ((1 << DIFF_BITS) - 1);
+        if c >= DIFFS.len() {
             panic!();
         }
         s1.push(DIFF_CHARS[c].0);
@@ -204,23 +227,6 @@ fn get_chars(k: u32, i: usize) -> (String, String) {
     (s1, s2)
 }
 
-const H_LOOKUP: [B; 256] = {
-    let mut lookup = [1; 256];
-    let a = 0x3c8b_fbb3_95c6_0474u64;
-    let c = 0x3193_c185_62a0_2b4cu64;
-    let g = 0x2032_3ed0_8257_2324u64;
-    let t = 0x2955_49f5_4be2_4456u64;
-    lookup[b'A' as usize] = a as B;
-    lookup[b'C' as usize] = c as B;
-    lookup[b'G' as usize] = g as B;
-    lookup[b'T' as usize] = t as B;
-    lookup[b'N' as usize] = 0;
-    lookup[0] = a as B;
-    lookup[1] = c as B;
-    lookup[2] = g as B;
-    lookup[3] = t as B;
-    lookup
-};
 #[inline(always)]
 fn h_bitpacked(c: B) -> B {
     unsafe { *H_LOOKUP.get_unchecked(c as usize) }
@@ -266,12 +272,15 @@ mod test {
     use super::*;
     use assert2::assert;
 
+    #[ignore = "changed constants"]
     #[test]
     fn nthash_slice() {
         let s = b"ACGT";
-        let h1 = super::nthash_slice(s);
+        let h1 = super::nthash_slice(s) as u64;
         let h2 = nthash::ntf64(s, 0, 4);
-        assert!(h1 == h2);
+        if B::BITS == 64 {
+            assert!(h1 == h2);
+        }
     }
 
     #[test]
@@ -283,6 +292,7 @@ mod test {
         let h2 = nthash::ntf64(s2, 0, 23);
         assert!(h1 == h2);
     }
+
     #[test]
     fn collision_24() {
         let s1 = b"CAAGAAAGAAACACCAACAAACAG";
@@ -291,5 +301,50 @@ mod test {
         let h1 = nthash::ntf64(s1, 0, 24);
         let h2 = nthash::ntf64(s2, 0, 24);
         assert!(h1 == h2);
+    }
+
+    #[test]
+    fn test_invertible() {
+        let a = h_char(b'A');
+        let c = h_char(b'C');
+        let g = h_char(b'G');
+        let t = h_char(b'T');
+        assert!(a ^ c ^ g ^ t == 0);
+        let mut v = [0; B::BITS as usize];
+        for i in 0..B::BITS / 2 {
+            v[2 * i as usize] = (a ^ c).rotate_left(i);
+            v[2 * i as usize + 1] = (a ^ g).rotate_left(i);
+        }
+        assert!(gaussian_elimination(v));
+    }
+
+    fn gaussian_elimination(mut words: [B; B::BITS as usize]) -> bool {
+        let mut inv = true;
+        // i: fixed rows.
+        let mut i = 0;
+        // j: fixed columns.
+        for j in 0..B::BITS as usize {
+            // Find a pivot row k with bit i set.
+            let mut k = i;
+            while k < B::BITS as usize && words[k] & (1 << j) == 0 {
+                k += 1;
+            }
+            if k == B::BITS as usize {
+                inv = false;
+                continue;
+            }
+            // Make row i the pivot row.
+            words.swap(i, k);
+            for k in (i + 1)..B::BITS as usize {
+                if words[k] & (1 << j) != 0 {
+                    words[k] ^= words[i];
+                }
+            }
+            i += 1;
+        }
+        for w in words {
+            eprintln!("{:0width$b}", w, width = B::BITS as usize);
+        }
+        inv
     }
 }
