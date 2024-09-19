@@ -1,7 +1,10 @@
 #![feature(impl_trait_in_assoc_type, slice_group_by)]
 
+pub mod lcr;
 mod minimizers;
 pub mod rolling_hash;
+
+use std::cmp::{max, min};
 
 use rdst::{RadixKey, RadixSort};
 use rolling_hash::Mod;
@@ -38,12 +41,16 @@ fn group_len(v: &mut [IH], i: usize) -> usize {
 }
 
 impl Ssa {
-    pub fn new(t: &[u8], idxs: Vec<usize>, l0: Option<usize>, exp_search: bool) -> Self {
+    pub fn new(t: &[u8], idxs: &Vec<usize>) -> Self {
+        Self::new_params(t, idxs, Some(idxs.len().ilog2() as _), true)
+    }
+    pub fn new_params(t: &[u8], idxs: &Vec<usize>, l0: Option<usize>, exp_search: bool) -> Self {
         assert!(!idxs.is_empty());
         let n = t.len();
-        let l0 = match l0 {
-            Some(max_l) => max_l.next_power_of_two(),
-            None => 1 << n.ilog2(),
+        let l0 = match (l0, exp_search) {
+            (Some(max_l), _) => max_l.next_power_of_two(),
+            (None, false) => 1 << n.ilog2(),
+            (None, true) => (idxs.len().ilog2() / 2).next_power_of_two() as _,
         };
         let b = idxs.len();
         let s = if n == 1 {
@@ -51,12 +58,13 @@ impl Ssa {
         } else {
             (n / n.ilog2() as usize).next_power_of_two().max(8)
         };
+        let start = std::time::Instant::now();
         let hasher = rolling_hash::RollingHash::new(t, s);
-        eprintln!("Hasher done");
+        eprintln!("Hasher done in {:?}", start.elapsed());
 
         let mut starts = idxs
-            .into_iter()
-            .map(|idx| IH {
+            .iter()
+            .map(|&idx| IH {
                 idx,
                 h: Mod::default(),
             })
@@ -68,10 +76,10 @@ impl Ssa {
         let mut cache = vec![];
 
         fn witness(idx: usize, t: &[u8], cache: &Vec<usize>) -> usize {
-            if idx < t.len() {
+            if idx <= t.len() {
                 idx
             } else {
-                cache[idx - t.len()]
+                cache[idx - t.len() - 1]
             }
         }
 
@@ -118,6 +126,7 @@ impl Ssa {
                 *h = hasher.query(idx + group_lcp..idx + group_lcp + l);
             }
             // Second, sort by hashes.
+            // starts.sort_by_key(|h| h.h.0);
             starts
                 .radix_sort_builder()
                 .with_single_threaded_tuner()
@@ -128,7 +137,12 @@ impl Ssa {
             if num_groups == 1 {
                 // One big group: Recurse with increased LCP length.
                 dfs(
-                    if exp_search { l * 2 } else { l / 2 },
+                    if exp_search {
+                        // eprintln!("L {}", l * 2);
+                        l * 2
+                    } else {
+                        l / 2
+                    },
                     exp_search,
                     group_lcp + l,
                     t,
@@ -162,7 +176,7 @@ impl Ssa {
                 if group_len == 1 {
                     starts[j] = starts[i];
                 } else {
-                    let group_idx = t.len() + cache.len();
+                    let group_idx = t.len() + 1 + cache.len();
                     let witness = witness(starts[i].idx, t, cache);
                     // 1. Move groups to the cache.
                     cache.push(witness);
@@ -192,12 +206,12 @@ impl Ssa {
             // 4. Insert cached groups back into the main array.
             while j > 0 {
                 j -= 1;
-                if starts[j].idx < t.len() + old_cache_len {
+                if starts[j].idx < t.len() + 1 + old_cache_len {
                     i -= 1;
                     starts[i].idx = starts[j].idx;
                     starts[i].h = Mod::NONE;
                 } else {
-                    let cache_idx = starts[j].idx - t.len();
+                    let cache_idx = starts[j].idx - t.len() - 1;
                     let group_len = cache[cache_idx + 1];
                     i -= group_len;
                     for k in 0..group_len {
@@ -221,7 +235,12 @@ impl Ssa {
                 }
                 let group_len = group_len(starts, i);
                 dfs(
-                    if exp_search { l * 2 } else { l / 2 },
+                    if exp_search {
+                        // eprintln!("L {}", l * 2);
+                        l * 2
+                    } else {
+                        l / 2
+                    },
                     exp_search,
                     group_lcp + l,
                     t,
@@ -250,37 +269,60 @@ impl Ssa {
             lcp,
         }
     }
+
+    pub fn verify(&self, t: &[u8]) {
+        let b = self.sa.len();
+        assert_eq!(self.lcp.len(), b - 1);
+        for i in 0..b - 1 {
+            if t[self.sa[i]..] > t[self.sa[i + 1]..] {
+                assert!(
+                    t[self.sa[i]..] > t[self.sa[i + 1]..],
+                    "Bad order at position {i} with LCP {}. Prefixes:\n{}\n{}",
+                    self.lcp[i],
+                    t[self.sa[i]..]
+                        .iter()
+                        .take(100)
+                        .map(|&x| x as char)
+                        .collect::<String>(),
+                    t[self.sa[i + 1]..]
+                        .iter()
+                        .take(100)
+                        .map(|&x| x as char)
+                        .collect::<String>(),
+                );
+            }
+            assert_eq!(
+                lcp(t, self.sa[i], self.sa[i + 1]),
+                self.lcp[i],
+                "Bad LCP at position {i}. Got {}",
+                self.lcp[i]
+            );
+        }
+    }
+    pub fn print(&self, t: &[u8]) {
+        eprintln!("{}", std::str::from_utf8(t).unwrap());
+        for i in 0..self.sa.len() {
+            let j = self.sa[i];
+            let lcp = self.lcp.get(i).copied().unwrap_or_default();
+            let lcp2 = self.lcp.get(i.wrapping_sub(1)).copied().unwrap_or_default();
+            let pref = std::str::from_utf8(&t[j..min(j + max(lcp, lcp2) + 1, t.len())]).unwrap();
+            eprintln!("{i:>3} {j:>3} {lcp:>3} {pref}");
+        }
+    }
+}
+
+fn lcp(t: &[u8], a: usize, b: usize) -> usize {
+    std::iter::zip(&t[a..], &t[b..])
+        .take_while(|(a, b)| a == b)
+        .count()
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
 
-    fn lcp(t: &[u8], a: usize, b: usize) -> usize {
-        std::iter::zip(&t[a..], &t[b..])
-            .take_while(|(a, b)| a == b)
-            .count()
-    }
-
-    fn verify(ssa: Ssa, t: &[u8]) {
-        let b = ssa.sa.len();
-        assert_eq!(ssa.lcp.len(), b - 1);
-        for i in 0..b - 1 {
-            assert!(
-                t[ssa.sa[i]..] <= t[ssa.sa[i + 1]..],
-                "Bad order at position {i}"
-            );
-            assert_eq!(
-                lcp(t, ssa.sa[i], ssa.sa[i + 1]),
-                ssa.lcp[i],
-                "Bad LCP at position {i}. Got {}",
-                ssa.lcp[i]
-            );
-        }
-    }
-
     #[test]
-    fn small() {
+    fn small_ssa() {
         for t in [
             &b"aaaa"[..],
             &b"aa"[..],
@@ -290,26 +332,40 @@ mod test {
             &[0, 0, 0, 0],
         ] {
             let idxs = (0..t.len()).collect::<Vec<_>>();
-            let ssa = Ssa::new(t, idxs, None, false);
-            verify(ssa, t);
+            let ssa1 = Ssa::new_params(t, &idxs, None, false);
+            ssa1.verify(t);
+            let ssa2 = Ssa::new_params(t, &idxs, Some(1), true);
+            ssa2.verify(t);
+            let ssa3 = Ssa::new_params(t, &idxs, None, true);
+            ssa3.verify(t);
+            assert_eq!(ssa1.sa, ssa2.sa);
+            assert_eq!(ssa1.sa, ssa3.sa);
         }
     }
 
     #[test]
-    fn random() {
+    fn random_ssa() {
         for &fraction in [0.01, 0.1, 0.5, 0.9, 0.99, 1.0].iter().rev() {
-            for len in (1..100).chain([100, 1000, 10000, 100000].iter().copied()) {
-                let t = (0..len)
-                    .map(|_| rand::random::<u8>() % 4)
-                    .collect::<Vec<_>>();
-                let idxs = (0..len)
-                    .filter(|_| rand::random::<f64>() < fraction)
-                    .collect::<Vec<_>>();
-                if idxs.is_empty() {
-                    continue;
+            for len in (1..100).chain([100, 1000, 10000].iter().copied()) {
+                for _ in 0..10 {
+                    let t = &(0..len)
+                        .map(|_| rand::random::<u8>() % 4)
+                        .collect::<Vec<_>>();
+                    let idxs = (0..len)
+                        .filter(|_| rand::random::<f64>() < fraction)
+                        .collect::<Vec<_>>();
+                    if idxs.is_empty() {
+                        continue;
+                    }
+                    let ssa1 = Ssa::new_params(t, &idxs, None, false);
+                    ssa1.verify(t);
+                    let ssa2 = Ssa::new_params(t, &idxs, Some(1), true);
+                    ssa2.verify(t);
+                    let ssa3 = Ssa::new_params(t, &idxs, None, true);
+                    ssa3.verify(t);
+                    assert_eq!(ssa1.sa, ssa2.sa);
+                    assert_eq!(ssa1.sa, ssa3.sa);
                 }
-                let ssa = Ssa::new(&t, idxs, None, false);
-                verify(ssa, &t);
             }
         }
     }

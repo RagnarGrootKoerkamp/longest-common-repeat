@@ -1,0 +1,2 @@
+run:
+    cargo run -r -- ../../../data/chm13v2.0.fa 1000
