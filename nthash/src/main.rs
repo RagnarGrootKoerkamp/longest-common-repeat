@@ -13,12 +13,12 @@ type B = u64;
 
 const H_LOOKUP: [B; 256] = {
     let mut lookup = [1; 256];
-    //  a = 0x3c8b_fbb3_95c6_0474u64 as B;
-    let a = 0x3c8b_fbb3_95c6_0470u64 as B;
+    let a = 0x3c8b_fbb3_95c6_0474u64 as B;
+    // let a = 0x3c8b_fbb3_95c6_0470u64 as B;
     let c = 0x3193_c185_62a0_2b4cu64 as B;
     let g = 0x2032_3ed0_8257_2324u64 as B;
-    //  t = 0x2955_49f5_4be2_4456u64 as B;
-    let t = a ^ c ^ g;
+    let t = 0x2955_49f5_4be2_4456u64 as B;
+    // let t = a ^ c ^ g;
     lookup[b'A' as usize] = a;
     lookup[b'C' as usize] = c;
     lookup[b'G' as usize] = g;
@@ -30,15 +30,15 @@ const H_LOOKUP: [B; 256] = {
     lookup
 };
 
-const DIFFS: [B; 4] = {
+const DIFFS: [B; 7] = {
     let a = H_LOOKUP[b'A' as usize] as B;
     let c = H_LOOKUP[b'C' as usize] as B;
     let g = H_LOOKUP[b'G' as usize] as B;
     let t = H_LOOKUP[b'T' as usize] as B;
-    // [0, a ^ c, a ^ g, a ^ t, c ^ g, c ^ t, g ^ t, 0]
-    [0, a ^ c, a ^ g, a ^ t]
+    [0, a ^ c, a ^ g, a ^ t, c ^ g, c ^ t, g ^ t]
+    // [0, a ^ c, a ^ g, a ^ t]
 };
-const DIFF_BITS: u32 = 2;
+const DIFF_BITS: u32 = 3;
 const DIFF_CHARS: [(u8, u8); 7] = [
     (b'A', b'A'),
     (b'A', b'C'),
