@@ -13,12 +13,13 @@ type B = u64;
 
 const H_LOOKUP: [B; 256] = {
     let mut lookup = [1; 256];
-    let a = 0x3c8b_fbb3_95c6_0474u64 as B;
-    // let a = 0x3c8b_fbb3_95c6_0470u64 as B;
+    // let a = 0x3c8b_fbb3_95c6_0474u64 as B; // old
+    // let a = 0x3c8b_fbb3_95c6_0470u64 as B; // new
+    let a = 0x3c8b_fbb3_95c6_0471u64 as B; // newer
     let c = 0x3193_c185_62a0_2b4cu64 as B;
     let g = 0x2032_3ed0_8257_2324u64 as B;
-    let t = 0x2955_49f5_4be2_4456u64 as B;
-    // let t = a ^ c ^ g;
+    // let t = 0x2955_49f5_4be2_4456u64 as B; // old
+    let t = a ^ c ^ g; // new
     lookup[b'A' as usize] = a;
     lookup[b'C' as usize] = c;
     lookup[b'G' as usize] = g;
@@ -30,15 +31,26 @@ const H_LOOKUP: [B; 256] = {
     lookup
 };
 
-const DIFFS: [B; 7] = {
+// OLD version
+// const DIFF_BITS: u32 = 3;
+// const DIFFS: [B; 7] = {
+//     let a = H_LOOKUP[b'A' as usize] as B;
+//     let c = H_LOOKUP[b'C' as usize] as B;
+//     let g = H_LOOKUP[b'G' as usize] as B;
+//     let t = H_LOOKUP[b'T' as usize] as B;
+//     [0, a ^ c, a ^ g, a ^ t, c ^ g, c ^ t, g ^ t]
+// };
+
+// NEW version
+const DIFF_BITS: u32 = 2;
+const DIFFS: [B; 4] = {
     let a = H_LOOKUP[b'A' as usize] as B;
     let c = H_LOOKUP[b'C' as usize] as B;
     let g = H_LOOKUP[b'G' as usize] as B;
     let t = H_LOOKUP[b'T' as usize] as B;
-    [0, a ^ c, a ^ g, a ^ t, c ^ g, c ^ t, g ^ t]
-    // [0, a ^ c, a ^ g, a ^ t]
+    [0, a ^ c, a ^ g, a ^ t]
 };
-const DIFF_BITS: u32 = 3;
+
 const DIFF_CHARS: [(u8, u8); 7] = [
     (b'A', b'A'),
     (b'A', b'C'),
@@ -81,7 +93,8 @@ fn test_sort(k: u32) -> u64 {
 
 fn main() {
     let mut v = vec![];
-    for k in (0..=B::BITS / 2).step_by(2) {
+    // for k in (0..=B::BITS / 2 + 2).step_by(2) {
+    for k in 34..=34 {
         eprintln!("k {k} (new)");
         let start = std::time::Instant::now();
         let collisions = search_collision(k);
@@ -109,36 +122,46 @@ fn main() {
 /// Returns a list of collisions.
 fn search_collision(k: u32) -> Vec<B> {
     let check_bits = std::cmp::min(61, B::BITS);
-    let max = (1u64 << check_bits).wrapping_sub(1);
-
-    assert!(k % 2 == 0);
-
-    let mut v: Vec<B> = (0..1 << (DIFF_BITS * k / 2))
-        .into_par_iter()
-        .flat_map_iter(|i| {
-            let h = match reduced_hash(k, i) {
-                Some(value) => value,
-                None => return None.into_iter().chain(None),
-            };
-
-            let hr = h.rotate_right(k / 2);
-
-            let h1 = if (h as u64) <= max { Some(h) } else { None };
-            let h2 = if (hr as u64) <= max { Some(hr) } else { None };
-            h1.into_iter().chain(h2)
-        })
-        .collect();
-    eprintln!("sorting len {} ..", v.len());
-    v.radix_sort_unstable();
-    // Iterate over v1 and v2 and find duplicates.
-    let mut collisions = vec![];
-    for &[x, y] in v.array_windows() {
-        if x == y && x != 0 {
-            eprintln!("Collision at {:0width$b}", x, width = B::BITS as usize);
-            collisions.push(x);
-        }
+    let mut max = (1u64 << check_bits).wrapping_sub(1);
+    if check_bits == 64 {
+        max = u64::MAX;
     }
 
+    let mut collisions = vec![];
+    for r in 0..1 << (B::BITS - check_bits) {
+        assert!(k % 2 == 0);
+
+        let mut v: Vec<B> = (0..1 << (DIFF_BITS * k / 2))
+            .into_par_iter()
+            .flat_map_iter(|i| {
+                let (hl, hr) = match reduced_hash(k, i) {
+                    Some(value) => value,
+                    None => return None.into_iter().chain(None),
+                };
+
+                let h1 = if ((hl as u64) >> check_bits) == r {
+                    Some(hl)
+                } else {
+                    None
+                };
+                let h2 = if ((hr as u64) >> check_bits) == r {
+                    Some(hr)
+                } else {
+                    None
+                };
+                h1.into_iter().chain(h2)
+            })
+            .collect();
+        eprintln!("sorting len {} ..", v.len());
+        v.radix_sort_unstable();
+        // Iterate over v1 and v2 and find duplicates.
+        for &[x, y] in v.array_windows() {
+            if x == y && x != 0 {
+                eprintln!("Collision at {:0width$b}", x, width = B::BITS as usize);
+                collisions.push(x);
+            }
+        }
+    }
     eprintln!("collisions: {}", collisions.len());
     collisions
 }
@@ -151,15 +174,13 @@ fn resolve_collisions(k: u32, c: Vec<B>) {
     let fragments: Mutex<Vec<(usize, usize)>> = Mutex::new(vec![(usize::MAX, usize::MAX); c.len()]);
 
     (0..1 << (DIFF_BITS * k / 2)).into_par_iter().for_each(|i| {
-        let h = match reduced_hash(k, i) {
+        let (hl, hr) = match reduced_hash(k, i) {
             Some(value) => value,
             None => return,
         };
 
-        let hr = h.rotate_right(k / 2);
-
-        if c.contains(&h) {
-            let p = c.iter().position(|&x| x == h).unwrap();
+        if c.contains(&hl) {
+            let p = c.iter().position(|&x| x == hl).unwrap();
             let mut fragments = fragments.lock().unwrap();
             fragments[p].0 = i;
         }
@@ -193,14 +214,32 @@ fn resolve_collisions(k: u32, c: Vec<B>) {
     }
 }
 
-fn reduced_hash(k: u32, i: usize) -> Option<B> {
+fn new_rol(h: B) -> B {
+    let h = h.rotate_left(7);
+    h ^ (h << 23)
+}
+fn new_rol_pow(h: B, i: u32) -> B {
+    let mut h = h;
+    for _ in 0..i {
+        h = new_rol(h);
+    }
+    h
+}
+
+fn reduced_hash(k: u32, i: usize) -> Option<(B, B)> {
     let mut h: B = 0;
     for j in 0..k / 2 {
         let c = (i >> (DIFF_BITS * j)) & ((1 << DIFF_BITS) - 1);
         if c >= DIFFS.len() {
             return None;
         }
-        h ^= unsafe { DIFFS.get_unchecked(c).rotate_right(j + B::BITS - 1) };
+        h = new_rol(h);
+        h ^= unsafe { DIFFS.get_unchecked(c) };
+    }
+    let hr = h;
+    let mut hl = h;
+    for j in 0..k / 2 {
+        hl = new_rol(hl);
     }
     // eprintln!(
     //     "Hash of {}^{} is {:0width$b}",
@@ -209,7 +248,7 @@ fn reduced_hash(k: u32, i: usize) -> Option<B> {
     //     h,
     //     width = B::BITS as usize
     // );
-    Some(h)
+    Some((hl, hr))
 }
 
 fn get_chars(k: u32, i: usize) -> (String, String) {
@@ -240,7 +279,8 @@ fn h_char(c: u8) -> B {
 pub fn nthash_mask(mut s: B, k: usize) -> B {
     let mut out = 0;
     for idx in 0..k {
-        out ^= h_bitpacked(s % 4).rotate_left((k - 1 - idx) as u32);
+        out = new_rol(out);
+        out ^= h_bitpacked(s % 4);
         s >>= 2;
     }
     out
@@ -250,7 +290,8 @@ pub fn nthash_slice(mut s: &[u8]) -> B {
     let k = s.len();
     let mut out = 0;
     for (idx, &c) in s.iter().enumerate() {
-        out ^= h_char(c).rotate_left((k - 1 - idx) as u32);
+        out = new_rol(out);
+        out ^= h_char(c);
     }
     out
 }
@@ -312,9 +353,13 @@ mod test {
         let t = h_char(b'T');
         assert!(a ^ c ^ g ^ t == 0);
         let mut v = [0; B::BITS as usize];
+        let mut x = a ^ c;
+        let mut y = a ^ g;
         for i in 0..B::BITS / 2 {
-            v[2 * i as usize] = (a ^ c).rotate_left(i);
-            v[2 * i as usize + 1] = (a ^ g).rotate_left(i);
+            v[2 * i as usize] = x;
+            v[2 * i as usize + 1] = y;
+            x = new_rol(x);
+            y = new_rol(y);
         }
         assert!(gaussian_elimination(v));
     }
@@ -347,5 +392,31 @@ mod test {
             eprintln!("{:0width$b}", w, width = B::BITS as usize);
         }
         inv
+    }
+
+    #[test]
+    fn test_leading_zeros() {
+        // let a = h_char(b'A');
+        // let c = h_char(b'C');
+        // let g = h_char(b'G');
+        // let t = h_char(b'T');
+        let a = rand::random::<u64>();
+        let c = rand::random::<u64>();
+        let g = rand::random::<u64>();
+        let t = a ^ c ^ g;
+        assert!(a ^ c ^ g ^ t == 0);
+        let chars = [a, c, g, t];
+        for k in (1..64).step_by(2) {
+            for c1 in 0..4 {
+                for c2 in 0..4 {
+                    let h = chars[c1] ^ chars[c2].rotate_left(7 * k);
+                    // let h = chars[c1] ^ new_rol_pow(chars[c2], k);
+                    let lz = h.leading_zeros();
+                    if lz > 5 {
+                        eprintln!("k={k:2} c1={c1} c2={c2} h={h:064b} lz={lz}");
+                    }
+                }
+            }
+        }
     }
 }
