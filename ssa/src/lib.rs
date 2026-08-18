@@ -1,4 +1,4 @@
-#![feature(impl_trait_in_assoc_type, slice_group_by)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod lcr;
 mod minimizers;
@@ -132,7 +132,7 @@ impl Ssa {
                 .with_single_threaded_tuner()
                 .sort();
             // Third, count groups.
-            let num_groups = starts.group_by(|a, b| a.h == b.h).count();
+            let num_groups = starts.chunk_by(|a, b| a.h == b.h).count();
             // Fourth, recurse into groups.
             if num_groups == 1 {
                 // One big group: Recurse with increased LCP length.
